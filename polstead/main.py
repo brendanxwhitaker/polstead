@@ -1,7 +1,7 @@
 import importlib
 
 import torch
-from asta import Tensor, typechecked, shapes
+from asta import Tensor, typechecked, dims
 
 import test
 
@@ -17,7 +17,7 @@ def main() -> None:
         print("TYPECHECK FAILED.")
         
     # Set ``DIM`` to the correct size, and reload any typechecked functions.
-    shapes.DIM = 5
+    dims.DIM = 5
     importlib.reload(test)
     res = test.identity(ob)
 
