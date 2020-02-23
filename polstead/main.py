@@ -1,25 +1,26 @@
+""" Example script for testing typecheck toggling. """
 import importlib
 
 import torch
-from asta import Tensor, typechecked, dims
+from asta import dims
 
-import test
+import fn
+from fn import identity
 
 
 def main() -> None:
-    global DIM
-
+    """ Test asta dims functionality. """
     # Before we set ``DIM``, typecheck fails.
-    ob = torch.ones((5,5,5))
+    ob = torch.ones((5, 5, 5))
     try:
-        res = test.identity(ob)
-    except TypeError as err:
+        identity(ob)
+    except TypeError as _err:
         print("TYPECHECK FAILED.")
-        
+
     # Set ``DIM`` to the correct size, and reload any typechecked functions.
     dims.DIM = 5
-    importlib.reload(test)
-    res = test.identity(ob)
+    importlib.reload(fn)
+    fn.identity(ob)
 
 
 if __name__ == "__main__":
