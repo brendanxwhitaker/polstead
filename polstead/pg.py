@@ -1,7 +1,6 @@
 """ An implementation of a simple policy gradient agent. """
 from typing import List
 
-import torch
 from torch import nn
 from torch.distributions.categorical import Categorical
 
@@ -22,7 +21,6 @@ class Trajectories:
         self.obs: List[Array[float, OBS_SHAPE]] = []
         self.actions: List[Array[float, ACT_SHAPE]] = []
         self.rewards: List[float] = []
-        self.weights: List[float] = []
 
     @typechecked
     def add(
@@ -37,10 +35,11 @@ class Trajectories:
         self.rewards.append(reward)
 
 
-class ActorCritic:
+class Policy(nn.Module):
     """ The parameterized action-value and state-value functions. """
 
     def __init__(self, observation_size: int, num_actions: int, hidden_size: int):
+        super().__init__()
         self.num_actions: int = num_actions
         self._policy = nn.Sequential(
             nn.Linear(observation_size, hidden_size),
@@ -52,52 +51,103 @@ class ActorCritic:
         )
 
     @typechecked
-    def policy(self, ob: Tensor[float, OBS_SHAPE]) -> Tensor[float, NUM_ACTIONS]:
+    def forward(self, ob: Tensor[float, (-1, OBS_SHAPE)]) -> Tensor[float, NUM_ACTIONS]:
         r""" Actor which implements the policy $\pi_{\theta}$. """
         logits = self._policy(ob)
         return logits
 
-    @typechecked
-    def get_policy(self, ob: Tensor[float, OBS_SHAPE]) -> Categorical:
-        """ Computes the policy distribution for the state given by ``ob``. """
-        logits: torch.Tensor = self.policy(ob)
-        policy = Categorical(logits=logits)
-        return policy
-
 
 @typechecked
-def compute_loss(
-    obs: Tensor[float, (-1, *OBS_SHAPE)],
-    actions: Tensor[float, (-1, *ACT_SHAPE)],
-    weights: Tensor[float, -1],
-) -> Tensor[float, ()]:
-    r"""
-    The loss function is derived from the formula for the gradient estimator.
-    Let $D$ denote the set of all trajectories $\tau$, and let $T$ be the
-    number of environment steps in a given trajectory. The index $t$ is the
-    current timestep in the current trajectory $\tau$, and the log probability
-    of an action $a_t$ given that action is taken from a state $s_t$ under our
-    policy $\pi_{\theta}$ is given by $\log \pi_{\theta}(a_t|s_t)$. The
-    trajectory return $R(\tau)$ is given by summing the rewards from every
-    timestep of the trajectory $\tau$. Note that trajectory lengths may vary,
-    and thus may have multiple trajectories in a single policy update.
+def get_policy_distribution(
+    policy: nn.Module, obs: Tensor[float, (-1, *OBS_SHAPE)]
+) -> Categorical:
+    """ Computes the policy distribution for the state given by ``ob``. """
+    logits: Tensor[float, NUM_ACTIONS] = policy(obs)
+    distribution = Categorical(logits=logits)
+    return distribution
 
+
+COMPUTE_LOSS_DOCSTRING = r"""
+    The loss function is derived from the formula for the gradient estimator.
+
+    $J$ : expected return function.
+    $\theta$ : parameters/weights of the policy.
+    $\pi_{\theta}$ : the policy parameterized by $\theta$.
     $\tau$ : a trajectory.
+    $R(\tau)$ : the return given by summing all rewards in a trajectory.
     $D$ : set of all trajectories $\tau$.
     #T$ : number of environment steps in a given trajectory.
     $t$ : index of current timestep in a trajectory.
     $a_t$ : action at timestep $t$.
     $s_t$ : state at timestep $t$.
-    $\theta$ : parameters/weights of the policy.
-    $\pi_{\theta}$ : the policy parameterized by $\theta$.
-    $R(\tau)$ : the return given by summing all rewards in a trajectory.
 
     In this case, the gradient estimator is given by:
+
     $$
         \hat(g)
         =
             \frac{1}{|D|} \sum_{\tau \in D} \sum_{t = 0}^{T}
-            \grad_{\theta} \log \pi_{\theta}(a_t|s_t) R(\tau).
+            \nabla_{\theta} \log \pi_{\theta}(a_t|s_t) R(\tau).
     $$
+
+    We aim to maximize the expected return return of the policy, given by
+
+    $$
+    J(\pi_{\theta}) = E_{\tau \sim \pi_{\theta}} [R(\tau)].
+    $$
+
+    We do this by computing the gradient of the expected returns with respect
+    to our parameters $\theta$, which tells us how to update said parameters.
+    This quantity is known as the policy gradient, denoted
+
+    $$
+    \nabla_{\theta} J(\pi_{\theta}).
+    $$
+
+    Libraries like torch allow us to perform stochastic gradient descent (or a
+    similar optimization algorithm) on an arbitrary loss function, which
+    minimizes the value of the function by updating the trainable parameters
+    involved in the computation of that function via backpropagation.
+
+    So we use as our loss function the expression being differentiated in our
+    formula for the gradient estimator. Note that the sum of gradients is the
+    gradient of the sum, and so we can take $\nabla_{\theta}$ out of the double
+    sum. The resulting expression is
+
+    $$
+            \frac{1}{|D|} \sum_{\tau \in D} \sum_{t = 0}^{T}
+            \log \pi_{\theta}(a_t|s_t) R(\tau).
+    $$
+
+    If we were to use this as our loss function and call ``.backward()`` on its
+    value using torch, we would be minimizing its value, hence minimizing
+    expected returns. But since we wish to maximize expected rewards, we want
+    our policy gradient to remain positive (the function for which the gradient
+    of the above is an estimator). Thus we can use the negative of the above as
+    our loss function.
+
+    Assuming we run one policy update per trajectory, we don't need the outer
+    sum, and hence the loss function is given by
+
+    $$
+        L(\pi_{\theta})
+        =
+            - \sum_{t = 0}^{T} \log \pi_{\theta}(a_t|s_t) R(\tau).
+    $$
+
+    This is what is implemented below.
     """
-    raise NotImplementedError
+
+
+@typechecked
+def compute_loss(
+    policy: nn.Module,
+    obs: Tensor[float, (-1, *OBS_SHAPE)],
+    actions: Tensor[float, (-1, *ACT_SHAPE)],
+    weights: Tensor[float, -1],
+) -> Tensor[float, ()]:
+    """ ^^^COMPUTE_LOSS_DOCSTRING^^^ """
+    policy_distribution = get_policy_distribution(policy, obs)
+    logp: Tensor[float, (-1, *ACT_SHAPE)] = policy_distribution.log_prob(actions)
+    loss = -(logp * weights).mean()
+    return loss
