@@ -2,7 +2,6 @@
 import torch
 from asta import Tensor, typechecked, check, dims
 
-check.on()
 DIM = dims.DIM
 
 

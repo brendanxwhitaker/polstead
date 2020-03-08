@@ -8,53 +8,57 @@ from asta import Array, Tensor, typechecked, check, dims
 
 # pylint: disable=too-few-public-methods
 
-check.on()
 OBS_SHAPE = dims.OBS_SHAPE
 ACT_SHAPE = dims.ACT_SHAPE
 NUM_ACTIONS = dims.NUM_ACTIONS
 
 
-class Trajectories:
-    """ An object to hold trajectories of numpy arrays. """
+class Trajectory:
+    """ An object to hold a trajectory composed of numpy arrays. """
 
     def __init__(self) -> None:
         self.obs: List[Array[float, OBS_SHAPE]] = []
-        self.actions: List[Array[float, ACT_SHAPE]] = []
-        self.rewards: List[float] = []
+        self.acts: List[Array[float, ACT_SHAPE]] = []
+        self.rews: List[float] = []
 
     @typechecked
     def add(
-        self,
-        ob: Array[float, OBS_SHAPE],
-        action: Array[float, ACT_SHAPE],
-        reward: float,
+        self, ob: Array[float, OBS_SHAPE], act: Array[float, ACT_SHAPE], rew: float,
     ) -> None:
         """ Add an observation, action, and reward to storage. """
         self.obs.append(ob)
-        self.actions.append(action)
-        self.rewards.append(reward)
+        self.acts.append(act)
+        self.rews.append(rew)
 
 
 class Policy(nn.Module):
     """ The parameterized action-value and state-value functions. """
 
-    def __init__(self, observation_size: int, num_actions: int, hidden_size: int):
+    def __init__(self, observation_size: int, num_actions: int, hidden_dim: int):
         super().__init__()
         self.num_actions: int = num_actions
         self._policy = nn.Sequential(
-            nn.Linear(observation_size, hidden_size),
+            nn.Linear(observation_size, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_size, num_actions),
+            nn.Linear(hidden_dim, num_actions),
             nn.Softmax(dim=-1),
         )
 
     @typechecked
-    def forward(self, ob: Tensor[float, (-1, OBS_SHAPE)]) -> Tensor[float, NUM_ACTIONS]:
+    def forward(
+        self, ob: Tensor[float, (-1, *OBS_SHAPE)]
+    ) -> Tensor[float, NUM_ACTIONS]:
         r""" Actor which implements the policy $\pi_{\theta}$. """
         logits = self._policy(ob)
         return logits
+
+
+def get_action(
+    policy: nn.Module, ob: Tensor[float, OBS_SHAPE]
+) -> Tensor[float, ACT_SHAPE]:
+    raise NotImplementedError
 
 
 @typechecked
@@ -135,7 +139,9 @@ COMPUTE_LOSS_DOCSTRING = r"""
             - \sum_{t = 0}^{T} \log \pi_{\theta}(a_t|s_t) R(\tau).
     $$
 
-    This is what is implemented below.
+    This is what is implemented below. The ``weights`` tensor is just a uniform
+    array of the same length as the observations and actions where every
+    element is $R(\tau)$.
     """
 
 
@@ -143,11 +149,11 @@ COMPUTE_LOSS_DOCSTRING = r"""
 def compute_loss(
     policy: nn.Module,
     obs: Tensor[float, (-1, *OBS_SHAPE)],
-    actions: Tensor[float, (-1, *ACT_SHAPE)],
+    acts: Tensor[float, (-1, *ACT_SHAPE)],
     weights: Tensor[float, -1],
 ) -> Tensor[float, ()]:
     """ ^^^COMPUTE_LOSS_DOCSTRING^^^ """
     policy_distribution = get_policy_distribution(policy, obs)
-    logp: Tensor[float, (-1, *ACT_SHAPE)] = policy_distribution.log_prob(actions)
+    logp = policy_distribution.log_prob(acts)
     loss = -(logp * weights).mean()
     return loss
