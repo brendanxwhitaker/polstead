@@ -1,78 +1,58 @@
-""" An implementation of a simple policy gradient agent. """
+""" Functions for a simple policy gradient. """
 from typing import List, Tuple
 
+import numpy as np
+
 import torch
-from torch import nn
+import torch.nn as nn
 from torch.distributions.categorical import Categorical
 
-# import asta.check
-from asta import Array, Tensor, typechecked, dims
+import asta.check
+from asta import dims, Array, Tensor, typechecked
 
-# pylint: disable=too-few-public-methods
-
-OBS_SHAPE = dims.OBS_SHAPE
-NUM_ACTIONS = dims.NUM_ACTIONS
+OB = dims.OBS_SHAPE
+N_ACTS = dims.NUM_ACTIONS
 
 
-class Trajectory:
-    """ An object to hold a trajectory composed of numpy arrays. """
+@typechecked
+def get_policy_distribution(
+    policy: nn.Module, obs: Tensor[float, (*OB,)]
+) -> Categorical:
+    """ Computes the policy distribution for the state given by ``ob``. """
+    logits = policy(obs)
+    return Categorical(logits=logits)
 
-    def __init__(self) -> None:
-        self.obs: List[Array[float, OBS_SHAPE]] = []
-        self.acts: List[int] = []
-        self.rews: List[float] = []
-        self.weights: List[float] = []
-        self.ep_rets: List[float] = []
-        self.ep_lens: List[int] = []
 
-        self.ep_start_idx = 0
-        self.weights_idx = 0
-        self.batch_idx = 0
+@typechecked
+def get_batch_policy_distribution(
+    policy: nn.Module, obs: Tensor[float, (-1, *OB)]
+) -> Categorical:
+    """ Computes the policy distribution for a batch of observations. """
+    logits = policy(obs)
+    return Categorical(logits=logits)
 
-        self.ema_ret = 0.0
-        self.ema_alpha = 0.9
 
-    def add(self, ob: Array[float, OBS_SHAPE], act: int, rew: float,) -> None:
-        """ Add an observation, action, and reward to storage. """
-        self.obs.append(ob)
-        self.acts.append(act)
-        self.rews.append(rew)
+@typechecked
+def get_action(policy: nn.Module, obs: Tensor[float, (*OB,)]) -> int:
+    """ Sample action from policy. """
+    distribution = get_policy_distribution(policy, obs)
+    sample: Tensor[int, ()] = distribution.sample()
+    act: int = sample.item()
+    return act
 
-    @typechecked
-    def get(
-        self,
-    ) -> Tuple[
-        Tensor[float, (-1, *OBS_SHAPE)], Tensor[int, -1, NUM_ACTIONS], Tensor[float, -1]
-    ]:
-        """ Return observations, actions, and weights for a batch. """
-        obs_batch = self.obs[self.batch_idx :]
-        acts_batch = self.acts[self.batch_idx :]
-        weights_batch = self.weights[self.weights_idx :]
 
-        self.batch_idx = len(self.obs)
-        self.weights_idx = len(self.weights)
-
-        obs_t = torch.Tensor(obs_batch)
-        acts_t = torch.Tensor(acts_batch)
-        weights_t = torch.Tensor(weights_batch)
-
-        return obs_t, acts_t, weights_t
-
-    def finish(self) -> float:
-        """ Compute and save weights for a (possibly partially completed) episode. """
-        ep_ret = sum(self.rews[self.ep_start_idx :])
-        ep_len = len(self.rews) - self.ep_start_idx
-        self.weights.extend([ep_ret] * ep_len)
-        self.ep_start_idx = len(self.rews)
-        self.ep_rets.append(ep_ret)
-        self.ep_lens.append(ep_len)
-
-        self.ema_ret = self.ema_alpha * self.ema_ret + (1 - self.ema_alpha) * ep_ret
-        return self.ema_ret
-
-    def __len__(self) -> int:
-        """ Returns length of the buffer. """
-        return len(self.obs)
+@typechecked
+def compute_loss(
+    policy: nn.Module,
+    obs: Tensor[float, (-1, *OB)],
+    act: Tensor[int, -1],
+    weights: Tensor[float, -1],
+) -> Tensor[float, ()]:
+    """ See ``LOSS.txt``. """
+    # TODO: It would be useful to have variable shape elements which have to
+    # all be the same within a single function call, but can be anything.
+    logp = get_batch_policy_distribution(policy, obs).log_prob(act)
+    return -(logp * weights).mean()
 
 
 class Policy(nn.Module):
@@ -90,43 +70,71 @@ class Policy(nn.Module):
             nn.Identity(),
         )
 
-    def forward(
-        self, ob: Tensor[float, (-1, *OBS_SHAPE)]
-    ) -> Tensor[float, -1, NUM_ACTIONS]:
+    @typechecked
+    def forward(self, ob: Tensor[float, (..., *OB)]) -> Tensor[float, ..., N_ACTS]:
         r""" Actor which implements the policy $\pi_{\theta}$. """
         logits = self._policy(ob)
         return logits
 
 
-def get_action(policy: nn.Module, ob: Tensor[float, OBS_SHAPE]) -> Tensor[float, ()]:
-    """ Sample action from policy. """
-    obs: Tensor[float, (1, *OBS_SHAPE)] = ob.unsqueeze(0)
-    distribution = get_policy_distribution(policy, obs)
-    action = distribution.sample()
-    return action
+class Trajectories:
+    """ An object to hold trajectories. """
 
+    def __init__(self) -> None:
+        self.obs: List[Array[float, OB]] = []
+        self.acts: List[int] = []
+        self.rews: List[float] = []
+        self.weights: List[float] = []
+        self.ep_rets: List[float] = []
+        self.ep_lens: List[int] = []
 
-def get_policy_distribution(
-    policy: nn.Module, obs: Tensor[float, (-1, *OBS_SHAPE)]
-) -> Categorical:
-    """ Computes the policy distribution for the state given by ``ob``. """
-    logits: Tensor[float, NUM_ACTIONS] = policy(obs)
-    distribution = Categorical(logits=logits)
-    return distribution
+        self.rets: List[float] = []
+        self.lens: List[int] = []
 
+    def add(self, ob: Array[float, OB], act: int, rew: float) -> None:
+        """ Add an observation, action, and reward to storage. """
+        self.obs.append(ob)
+        self.acts.append(act)
+        self.rews.append(rew)
 
-@typechecked
-def compute_loss(
-    policy: nn.Module,
-    obs: Tensor[float, (-1, *OBS_SHAPE)],
-    acts: Tensor[float, -1],
-    weights: Tensor[float, -1],
-) -> Tensor[float, ()]:
-    """ See ``LOSS.txt``. """
-    # TODO: It would be useful to have variable shape elements which have to
-    # all be the same within a single function call, but can be anything.
-    assert len(acts) == len(weights) == obs.shape[0]
-    policy_distribution = get_policy_distribution(policy, obs)
-    logp = policy_distribution.log_prob(acts)
-    loss = -(logp * weights).mean()
-    return loss
+    @typechecked
+    def get(
+        self,
+    ) -> Tuple[
+        Tensor[float, (-1, *OB)], Tensor[int, -1, N_ACTS], Tensor[float, -1],
+    ]:
+        """ Return observations, actions, and weights for a batch. """
+        assert len(self.obs) == len(self.acts) == len(self.weights)
+
+        # Cast buffer storage to tensors.
+        obs_t = torch.Tensor(self.obs)
+        acts_t = torch.Tensor(self.acts)
+        weights_t = torch.Tensor(self.weights)
+
+        # Reset.
+        self.obs = []
+        self.acts = []
+        self.weights = []
+        self.rets = []
+        self.lens = []
+
+        return obs_t, acts_t, weights_t
+
+    def stats(self) -> Tuple[float, float]:
+        """ Return the current mean episode return and length. """
+        mean_ret = np.mean(self.rets)
+        mean_len = np.mean(self.lens)
+        return mean_ret, mean_len
+
+    def finish(self) -> None:
+        """ Compute and save weights for a (possibly partially completed) episode. """
+        ep_ret = sum(self.rews)
+        ep_len = len(self.rews)
+        self.rets.append(ep_ret)
+        self.lens.append(ep_len)
+        self.weights.extend([ep_ret] * ep_len)
+
+        assert len(self.obs) == len(self.acts) == len(self.weights)
+
+        # Reset.
+        self.rews = []
