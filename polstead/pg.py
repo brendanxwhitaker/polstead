@@ -1,15 +1,16 @@
 """ An implementation of a simple policy gradient agent. """
-from typing import List
+from typing import List, Tuple
 
+import torch
 from torch import nn
 from torch.distributions.categorical import Categorical
 
-from asta import Array, Tensor, typechecked, check, dims
+import asta.check
+from asta import Array, Tensor, typechecked, dims
 
 # pylint: disable=too-few-public-methods
 
 OBS_SHAPE = dims.OBS_SHAPE
-ACT_SHAPE = dims.ACT_SHAPE
 NUM_ACTIONS = dims.NUM_ACTIONS
 
 
@@ -18,17 +19,60 @@ class Trajectory:
 
     def __init__(self) -> None:
         self.obs: List[Array[float, OBS_SHAPE]] = []
-        self.acts: List[Array[float, ACT_SHAPE]] = []
+        self.acts: List[int] = []
         self.rews: List[float] = []
+        self.weights: List[float] = []
+        self.ep_rets: List[float] = []
+        self.ep_lens: List[int] = []
 
-    @typechecked
-    def add(
-        self, ob: Array[float, OBS_SHAPE], act: Array[float, ACT_SHAPE], rew: float,
-    ) -> None:
+        self.ep_start_idx = 0
+        self.weights_idx = 0
+        self.batch_idx = 0
+
+        self.ema_ret = 0.0
+        self.ema_alpha = 0.9
+
+    def add(self, ob: Array[float, OBS_SHAPE], act: int, rew: float,) -> None:
         """ Add an observation, action, and reward to storage. """
         self.obs.append(ob)
         self.acts.append(act)
         self.rews.append(rew)
+
+    @typechecked
+    def get(
+        self,
+    ) -> Tuple[
+        Tensor[float, (-1, *OBS_SHAPE)], Tensor[int, -1, NUM_ACTIONS], Tensor[float, -1]
+    ]:
+        """ Return observations, actions, and weights for a batch. """
+        obs_batch = self.obs[self.batch_idx :]
+        acts_batch = self.acts[self.batch_idx :]
+        weights_batch = self.weights[self.weights_idx :]
+
+        self.batch_idx = len(self.obs)
+        self.weights_idx = len(self.weights)
+
+        obs_t = torch.Tensor(obs_batch)
+        acts_t = torch.Tensor(acts_batch)
+        weights_t = torch.Tensor(weights_batch)
+
+        return obs_t, acts_t, weights_t
+
+    def finish(self) -> float:
+        """ Compute and save weights for a (possibly partially completed) episode. """
+        ep_ret = sum(self.rews[self.ep_start_idx :])
+        ep_len = len(self.rews) - self.ep_start_idx
+        self.weights.extend([ep_ret] * ep_len)
+        self.ep_start_idx = len(self.rews)
+        self.ep_rets.append(ep_ret)
+        self.ep_lens.append(ep_len)
+
+        self.ema_ret = self.ema_alpha * self.ema_ret + (1 - self.ema_alpha) * ep_ret
+        return self.ema_ret
+
+    def __len__(self) -> int:
+        """ Returns length of the buffer. """
+        return len(self.obs)
 
 
 class Policy(nn.Module):
@@ -43,25 +87,35 @@ class Policy(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, num_actions),
-            nn.Softmax(dim=-1),
+            nn.Identity(),
         )
 
-    @typechecked
     def forward(
         self, ob: Tensor[float, (-1, *OBS_SHAPE)]
-    ) -> Tensor[float, NUM_ACTIONS]:
+    ) -> Tensor[float, -1, NUM_ACTIONS]:
         r""" Actor which implements the policy $\pi_{\theta}$. """
         logits = self._policy(ob)
         return logits
 
+    @staticmethod
+    @typechecked
+    def static_forward(ob: Tensor[float, OBS_SHAPE]) -> Tensor[float, OBS_SHAPE]:
+        return ob
 
-def get_action(
-    policy: nn.Module, ob: Tensor[float, OBS_SHAPE]
-) -> Tensor[float, ACT_SHAPE]:
-    raise NotImplementedError
+    @classmethod
+    @typechecked
+    def class_forward(cls, ob: Tensor[float, OBS_SHAPE]) -> Tensor[float, OBS_SHAPE]:
+        return ob
 
 
-@typechecked
+def get_action(policy: nn.Module, ob: Tensor[float, OBS_SHAPE]) -> Tensor[float, ()]:
+    """ Sample action from policy. """
+    obs: Tensor[float, (1, *OBS_SHAPE)] = ob.unsqueeze(0)
+    distribution = get_policy_distribution(policy, obs)
+    action = distribution.sample()
+    return action
+
+
 def get_policy_distribution(
     policy: nn.Module, obs: Tensor[float, (-1, *OBS_SHAPE)]
 ) -> Categorical:
@@ -71,88 +125,17 @@ def get_policy_distribution(
     return distribution
 
 
-COMPUTE_LOSS_DOCSTRING = r"""
-    The loss function is derived from the formula for the gradient estimator.
-
-    $J$ : expected return function.
-    $\theta$ : parameters/weights of the policy.
-    $\pi_{\theta}$ : the policy parameterized by $\theta$.
-    $\tau$ : a trajectory.
-    $R(\tau)$ : the return given by summing all rewards in a trajectory.
-    $D$ : set of all trajectories $\tau$.
-    #T$ : number of environment steps in a given trajectory.
-    $t$ : index of current timestep in a trajectory.
-    $a_t$ : action at timestep $t$.
-    $s_t$ : state at timestep $t$.
-
-    In this case, the gradient estimator is given by:
-
-    $$
-        \hat(g)
-        =
-            \frac{1}{|D|} \sum_{\tau \in D} \sum_{t = 0}^{T}
-            \nabla_{\theta} \log \pi_{\theta}(a_t|s_t) R(\tau).
-    $$
-
-    We aim to maximize the expected return return of the policy, given by
-
-    $$
-    J(\pi_{\theta}) = E_{\tau \sim \pi_{\theta}} [R(\tau)].
-    $$
-
-    We do this by computing the gradient of the expected returns with respect
-    to our parameters $\theta$, which tells us how to update said parameters.
-    This quantity is known as the policy gradient, denoted
-
-    $$
-    \nabla_{\theta} J(\pi_{\theta}).
-    $$
-
-    Libraries like torch allow us to perform stochastic gradient descent (or a
-    similar optimization algorithm) on an arbitrary loss function, which
-    minimizes the value of the function by updating the trainable parameters
-    involved in the computation of that function via backpropagation.
-
-    So we use as our loss function the expression being differentiated in our
-    formula for the gradient estimator. Note that the sum of gradients is the
-    gradient of the sum, and so we can take $\nabla_{\theta}$ out of the double
-    sum. The resulting expression is
-
-    $$
-            \frac{1}{|D|} \sum_{\tau \in D} \sum_{t = 0}^{T}
-            \log \pi_{\theta}(a_t|s_t) R(\tau).
-    $$
-
-    If we were to use this as our loss function and call ``.backward()`` on its
-    value using torch, we would be minimizing its value, hence minimizing
-    expected returns. But since we wish to maximize expected rewards, we want
-    our policy gradient to remain positive (the function for which the gradient
-    of the above is an estimator). Thus we can use the negative of the above as
-    our loss function.
-
-    Assuming we run one policy update per trajectory, we don't need the outer
-    sum, and hence the loss function is given by
-
-    $$
-        L(\pi_{\theta})
-        =
-            - \sum_{t = 0}^{T} \log \pi_{\theta}(a_t|s_t) R(\tau).
-    $$
-
-    This is what is implemented below. The ``weights`` tensor is just a uniform
-    array of the same length as the observations and actions where every
-    element is $R(\tau)$.
-    """
-
-
 @typechecked
 def compute_loss(
     policy: nn.Module,
     obs: Tensor[float, (-1, *OBS_SHAPE)],
-    acts: Tensor[float, (-1, *ACT_SHAPE)],
+    acts: Tensor[float, -1],
     weights: Tensor[float, -1],
 ) -> Tensor[float, ()]:
-    """ ^^^COMPUTE_LOSS_DOCSTRING^^^ """
+    """ See ``LOSS.txt``. """
+    # TODO: It would be useful to have variable shape elements which have to
+    # all be the same within a single function call, but can be anything.
+    assert len(acts) == len(weights) == obs.shape[0]
     policy_distribution = get_policy_distribution(policy, obs)
     logp = policy_distribution.log_prob(acts)
     loss = -(logp * weights).mean()

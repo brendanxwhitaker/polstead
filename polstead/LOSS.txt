@@ -1,0 +1,70 @@
+The loss function is derived from the formula for the gradient estimator.
+
+$J$ : expected return function.
+$\theta$ : parameters/weights of the policy.
+$\pi_{\theta}$ : the policy parameterized by $\theta$.
+$\tau$ : a trajectory.
+$R(\tau)$ : the return given by summing all rewards in a trajectory.
+$D$ : set of all trajectories $\tau$.
+#T$ : number of environment steps in a given trajectory.
+$t$ : index of current timestep in a trajectory.
+$a_t$ : action at timestep $t$.
+$s_t$ : state at timestep $t$.
+
+In this case, the gradient estimator is given by:
+
+$$
+    \hat(g)
+    =
+        \frac{1}{|D|} \sum_{\tau \in D} \sum_{t = 0}^{T}
+        \nabla_{\theta} \log \pi_{\theta}(a_t|s_t) R(\tau).
+$$
+
+We aim to maximize the expected return return of the policy, given by
+
+$$
+J(\pi_{\theta}) = E_{\tau \sim \pi_{\theta}} [R(\tau)].
+$$
+
+We do this by computing the gradient of the expected returns with respect
+to our parameters $\theta$, which tells us how to update said parameters.
+This quantity is known as the policy gradient, denoted
+
+$$
+\nabla_{\theta} J(\pi_{\theta}).
+$$
+
+Libraries like torch allow us to perform stochastic gradient descent (or a
+similar optimization algorithm) on an arbitrary loss function, which
+minimizes the value of the function by updating the trainable parameters
+involved in the computation of that function via backpropagation.
+
+So we use as our loss function the expression being differentiated in our
+formula for the gradient estimator. Note that the sum of gradients is the
+gradient of the sum, and so we can take $\nabla_{\theta}$ out of the double
+sum. The resulting expression is
+
+$$
+        \frac{1}{|D|} \sum_{\tau \in D} \sum_{t = 0}^{T}
+        \log \pi_{\theta}(a_t|s_t) R(\tau).
+$$
+
+If we were to use this as our loss function and call ``.backward()`` on its
+value using torch, we would be minimizing its value, hence minimizing
+expected returns. But since we wish to maximize expected rewards, we want
+our policy gradient to remain positive (the function for which the gradient
+of the above is an estimator). Thus we can use the negative of the above as
+our loss function.
+
+Assuming we run one policy update per trajectory, we don't need the outer
+sum, and hence the loss function is given by
+
+$$
+    L(\pi_{\theta})
+    =
+        - \sum_{t = 0}^{T} \log \pi_{\theta}(a_t|s_t) R(\tau).
+$$
+
+This is what is implemented below. The ``weights`` tensor is just a uniform
+array of the same length as the observations and actions where every
+element is $R(\tau)$.
