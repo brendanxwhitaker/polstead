@@ -35,10 +35,13 @@ def train(ox: Oxentiel) -> None:
         ob_t: Tensor[float, dims.OBS_SHAPE] = torch.as_tensor(ob, dtype=torch.float32)
         act_t = get_action(policy, ob_t)
 
+        # Critical.
+        prev_ob = ob
+
         act: int = act_t.item()
         ob, rew, done, _ = env.step(act)
 
-        trajectory.add(ob, act, rew)
+        trajectory.add(prev_ob, act, rew)
 
         if done or i % ox.batch_size == 0:
             ema_ret = trajectory.finish()

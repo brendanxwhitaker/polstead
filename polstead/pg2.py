@@ -1,9 +1,14 @@
 """ Functions for a simple policy gradient. """
+from typing import List, Tuple
+
+import numpy as np
+
+import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 
 # import asta.check
-from asta import dims, Tensor, typechecked
+from asta import dims, Array, Tensor, typechecked
 
 OB = dims.OBS_SHAPE
 N_ACTS = dims.NUM_ACTIONS
@@ -70,3 +75,61 @@ class Policy(nn.Module):
         r""" Actor which implements the policy $\pi_{\theta}$. """
         logits = self._policy(ob)
         return logits
+
+
+class Trajectories:
+    """ An object to hold trajectories. """
+
+    def __init__(self) -> None:
+        self.obs: List[Array[float, OB]] = []
+        self.acts: List[int] = []
+        self.rews: List[float] = []
+        self.weights: List[float] = []
+        self.ep_rets: List[float] = []
+        self.ep_lens: List[int] = []
+
+        self.rets: List[float] = []
+        self.lens: List[int] = []
+
+    def add(self, ob: Array[float, OB], act: int, rew: float) -> None:
+        """ Add an observation, action, and reward to storage. """
+        self.obs.append(ob)
+        self.acts.append(act)
+        self.rews.append(rew)
+
+    @typechecked
+    def get(
+        self,
+    ) -> Tuple[Tensor[float, (-1, *OB)], Tensor[int, -1, N_ACTS], Tensor[float, -1], float, float]:
+        """ Return observations, actions, and weights for a batch. """
+        assert len(self.obs) == len(self.acts) == len(self.weights)
+
+        obs_t = torch.Tensor(self.obs)
+        acts_t = torch.Tensor(self.acts)
+        weights_t = torch.Tensor(self.weights)
+
+        mean_ret = np.mean(self.rets)
+        mean_len = np.mean(self.lens)
+
+        self.rets = []
+        self.lens = []
+
+        # Reset.
+        self.obs = []
+        self.acts = []
+        self.weights = []
+
+        return obs_t, acts_t, weights_t, mean_ret, mean_len
+
+    def finish(self) -> None:
+        """ Compute and save weights for a (possibly partially completed) episode. """
+        ep_ret = sum(self.rews)
+        ep_len = len(self.rews)
+        self.rets.append(ep_ret)
+        self.lens.append(ep_len)
+        self.weights.extend([ep_ret] * ep_len)
+
+        assert len(self.obs) == len(self.acts) == len(self.weights)
+
+        # Reset.
+        self.rews = []
