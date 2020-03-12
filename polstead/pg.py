@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.distributions.categorical import Categorical
 
-import asta.check
+# import asta.check
 from asta import Array, Tensor, typechecked, dims
 
 # pylint: disable=too-few-public-methods
@@ -96,16 +96,6 @@ class Policy(nn.Module):
         r""" Actor which implements the policy $\pi_{\theta}$. """
         logits = self._policy(ob)
         return logits
-
-    @staticmethod
-    @typechecked
-    def static_forward(ob: Tensor[float, OBS_SHAPE]) -> Tensor[float, OBS_SHAPE]:
-        return ob
-
-    @classmethod
-    @typechecked
-    def class_forward(cls, ob: Tensor[float, OBS_SHAPE]) -> Tensor[float, OBS_SHAPE]:
-        return ob
 
 
 def get_action(policy: nn.Module, ob: Tensor[float, OBS_SHAPE]) -> Tensor[float, ()]:
