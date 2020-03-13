@@ -7,9 +7,10 @@ import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 
-import asta.check
-from asta import dims, Array, Tensor, typechecked
+import asta.strict
+from asta import dims, vdims, Array, Tensor, typechecked
 
+X = vdims.X
 OB = dims.OBS_SHAPE
 N_ACTS = dims.NUM_ACTIONS
 
@@ -44,13 +45,11 @@ def get_action(policy: nn.Module, obs: Tensor[float, (*OB,)]) -> int:
 @typechecked
 def compute_loss(
     policy: nn.Module,
-    obs: Tensor[float, (-1, *OB)],
-    act: Tensor[int, -1],
-    weights: Tensor[float, -1],
+    obs: Tensor[float, (X, *OB)],
+    act: Tensor[int, X],
+    weights: Tensor[float, X],
 ) -> Tensor[float, ()]:
     """ See ``LOSS.txt``. """
-    # TODO: It would be useful to have variable shape elements which have to
-    # all be the same within a single function call, but can be anything.
     logp = get_batch_policy_distribution(policy, obs).log_prob(act)
     return -(logp * weights).mean()
 
@@ -101,14 +100,14 @@ class Trajectories:
     def get(
         self,
     ) -> Tuple[
-        Tensor[float, (-1, *OB)], Tensor[int, -1, N_ACTS], Tensor[float, -1],
+        Tensor[float, (X, *OB)], Tensor[int, X, N_ACTS], Tensor[float, X],
     ]:
         """ Return observations, actions, and weights for a batch. """
         assert len(self.obs) == len(self.acts) == len(self.weights)
 
         # Cast buffer storage to tensors.
         obs_t = torch.Tensor(self.obs)
-        acts_t = torch.Tensor(self.acts)
+        acts_t = torch.Tensor(self.acts).int()
         weights_t = torch.Tensor(self.weights)
 
         # Reset.
