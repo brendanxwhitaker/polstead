@@ -7,20 +7,17 @@ import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 
-import asta.strict
-from asta import dims, vdims, Array, Tensor, typechecked
+from asta import dims, shapes, symbols, Array, Tensor, typechecked
 
-X = vdims.X
-OB = dims.OBS_SHAPE
-N_ACTS = dims.NUM_ACTIONS
+X = symbols.X
+OB = shapes.OB
+N_ACTS = dims.N_ACTS
 
 
 @typechecked
-def get_policy_distribution(
-    policy: nn.Module, obs: Tensor[float, (*OB,)]
-) -> Categorical:
+def get_policy_distribution(policy: nn.Module, ob: Tensor[float, OB]) -> Categorical:
     """ Computes the policy distribution for the state given by ``ob``. """
-    logits = policy(obs)
+    logits = policy(ob)
     return Categorical(logits=logits)
 
 
@@ -34,7 +31,7 @@ def get_batch_policy_distribution(
 
 
 @typechecked
-def get_action(policy: nn.Module, obs: Tensor[float, (*OB,)]) -> int:
+def get_action(policy: nn.Module, obs: Tensor[float, OB]) -> int:
     """ Sample action from policy. """
     distribution = get_policy_distribution(policy, obs)
     sample: Tensor[int, ()] = distribution.sample()
@@ -52,6 +49,30 @@ def compute_loss(
     """ See ``LOSS.txt``. """
     logp = get_batch_policy_distribution(policy, obs).log_prob(act)
     return -(logp * weights).mean()
+
+
+@typechecked
+def reward_to_go(rews: List[float]) -> List[float]:
+    """ Weight function which only uses sum of rewards after an action is taken. """
+    n = len(rews)
+    rtgs = np.zeros((n,))
+    for i in reversed(range(n)):
+        # The subsequent rewards are the sum of ``rews[i + 1:]``.
+        if i + 1 < n:
+            subsequent_rews = rtgs[i + 1]
+        else:
+            subsequent_rews = 0
+        rtgs[i] = rews[i] + subsequent_rews
+    return list(rtgs)
+
+
+@typechecked
+def uniform_weights(rews: List[float]) -> List[float]:
+    """ Weight function where the weights are all just the episode return. """
+    ep_ret = sum(rews)
+    ep_len = len(rews)
+    weights = [ep_ret] * ep_len
+    return weights
 
 
 class Policy(nn.Module):
@@ -76,7 +97,7 @@ class Policy(nn.Module):
         return logits
 
 
-class Trajectories:
+class RolloutStorage:
     """ An object to hold trajectories. """
 
     def __init__(self) -> None:
@@ -100,7 +121,7 @@ class Trajectories:
     def get(
         self,
     ) -> Tuple[
-        Tensor[float, (X, *OB)], Tensor[int, X, N_ACTS], Tensor[float, X],
+        Tensor[float, (X, *OB)], Tensor[int, X], Tensor[float, X],
     ]:
         """ Return observations, actions, and weights for a batch. """
         assert len(self.obs) == len(self.acts) == len(self.weights)
@@ -131,7 +152,10 @@ class Trajectories:
         ep_len = len(self.rews)
         self.rets.append(ep_ret)
         self.lens.append(ep_len)
-        self.weights.extend([ep_ret] * ep_len)
+
+        episode_weights = reward_to_go(self.rews)
+        # episode_weights = uniform_weights(self.rews)
+        self.weights.extend(episode_weights)
 
         assert len(self.obs) == len(self.acts) == len(self.weights)
 
