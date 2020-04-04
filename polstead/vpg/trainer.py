@@ -8,7 +8,7 @@ import gym
 
 from oxentiel import Oxentiel
 
-from vpg import get_action, compute_loss, ActorCritic, RolloutStorage
+from vpg import get_action, compute_loss, finish, ActorCritic, RolloutStorage
 from asta import dims, shapes
 
 SETTINGS_PATH = "settings_pg.json"

@@ -1,6 +1,7 @@
 """ Functions for a simple policy gradient. """
 from typing import List, Tuple
 
+import scipy
 import numpy as np
 
 import torch
@@ -119,19 +120,27 @@ def reward_to_go(rews: List[float]) -> List[float]:
     return list(rtgs)
 
 
-@typechecked
-def fast_reward_to_go(rews: List[float]) -> List[float]:
+def discounted_cumulative_sum(x, discount):
+    """
+    magic from rllab for computing discounted cumulative sums of vectors.
+    
+    input:
+    vector x,
+    [x0,
+    x1,
+    x2]
+    
+    output:
+    [x0 + discount * x1 + discount^2 * x2,
+    x1 + discount * x2,
+    x2]
+    """
+    return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
+
+
+def fast_reward_to_go(rews: List[float], gamma: float) -> List[float]:
     """ Weight function which only uses sum of rewards after an action is taken. """
-    n = len(rews)
-    rtgs = np.zeros((n,))
-    for i in reversed(range(n)):
-        # The subsequent rewards are the sum of ``rews[i + 1:]``.
-        if i + 1 < n:
-            subsequent_rews = rtgs[i + 1]
-        else:
-            subsequent_rews = 0
-        rtgs[i] = rews[i] + subsequent_rews
-    return list(rtgs)
+    return discounted_cumulative_sum(rews, gamma)
 
 
 @typechecked
