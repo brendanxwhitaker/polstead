@@ -8,8 +8,10 @@ import torch
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
 
+from oxentiel import Oxentiel
 from asta import dims, shapes, symbols, Array, Tensor, typechecked
 
+# pylint: disable=too-few-public-methods
 
 X = symbols.X
 OB = shapes.OB
@@ -85,16 +87,18 @@ def get_batch_distribution(
 
 
 @typechecked
-def get_action(ac: ActorCritic, obs: Tensor[float, OB]) -> int:
+def get_action(ac: ActorCritic, ob: Tensor[float, OB]) -> Tuple[int, float]:
     """ Sample action from policy. """
-    distribution = get_distribution(policy, obs)
+    distribution = get_distribution(ac, ob)
     sample: Tensor[int, ()] = distribution.sample()
+    val_t = ac.v(ob)
     act: int = sample.item()
-    return act
+    val: float = val_t.item()
+    return act, val
 
 
 @typechecked
-def compute_loss(
+def compute_policy_loss(
     ac: ActorCritic,
     obs: Tensor[float, (X, *OB)],
     act: Tensor[int, X],
@@ -103,6 +107,14 @@ def compute_loss(
     """ Computes the loss function. """
     logp = get_batch_distribution(ac, obs).log_prob(act)
     return -(logp * weights).mean()
+
+
+@typechecked
+def compute_value_loss(
+    ac: ActorCritic, obs: Tensor[float, (X, *OB)], rets: Tensor[float, (X,)],
+) -> Tensor[float, ()]:
+    """ Computes the value loss function. """
+    return ((ac.v(obs) - rets) ** 2).mean()
 
 
 @typechecked
@@ -120,16 +132,17 @@ def reward_to_go(rews: List[float]) -> List[float]:
     return list(rtgs)
 
 
-def discounted_cumulative_sum(x, discount):
+@typechecked
+def discounted_cumulative_sum(x: List[float], discount: float) -> Array[float]:
     """
     magic from rllab for computing discounted cumulative sums of vectors.
-    
+
     input:
     vector x,
     [x0,
     x1,
     x2]
-    
+
     output:
     [x0 + discount * x1 + discount^2 * x2,
     x1 + discount * x2,
@@ -158,6 +171,7 @@ class RolloutStorage:
     def __init__(self) -> None:
         self.obs: List[Array[float, OB]] = []
         self.acts: List[int] = []
+        self.vals: List[int] = []
         self.rews: List[float] = []
         self.weights: List[float] = []
         self.ep_rets: List[float] = []
@@ -166,17 +180,18 @@ class RolloutStorage:
         self.rets: List[float] = []
         self.lens: List[int] = []
 
-    def add(self, ob: Array[float, OB], act: int, rew: float) -> None:
+    def add(self, ob: Array[float, OB], act: int, val: int, rew: float) -> None:
         """ Add an observation, action, and reward to storage. """
         self.obs.append(ob)
         self.acts.append(act)
+        self.vals.append(val)
         self.rews.append(rew)
 
     @typechecked
     def get(
         self,
     ) -> Tuple[
-        Tensor[float, (X, *OB)], Tensor[int, X], Tensor[float, X],
+        Tensor[float, (X, *OB)], Tensor[int, X], Tensor[float, X], Tensor[float, X]
     ]:
         """ Return observations, actions, and weights for a batch. """
         assert len(self.obs) == len(self.acts) == len(self.weights)
@@ -185,6 +200,7 @@ class RolloutStorage:
         obs_t = torch.Tensor(self.obs)
         acts_t = torch.Tensor(self.acts).int()
         weights_t = torch.Tensor(self.weights)
+        rets_t = torch.Tensor(self.rets)
 
         # Reset.
         self.obs = []
@@ -193,7 +209,7 @@ class RolloutStorage:
         self.rets = []
         self.lens = []
 
-        return obs_t, acts_t, weights_t
+        return obs_t, acts_t, weights_t, rets_t
 
     def stats(self) -> Tuple[float, float]:
         """ Return the current mean episode return and length. """
@@ -203,7 +219,7 @@ class RolloutStorage:
 
 
 def finish(
-    rews: List[float], vals: List[float], last_val: int
+    ox: Oxentiel, rews: List[float], vals: List[float], last_val: int
 ) -> Tuple[List[float], List[float]]:
     """
     Compute and save weights for a (possibly partially completed) episode.
@@ -215,6 +231,7 @@ def finish(
     # See the GAE paper, definition of $\delta$ is between equations (9) and (10).
     # $\delta_{t}^{V} = r_t + \gamma V(s_{t + 1}) - V(s_t)$.
     # We compute deltas for 0 <= t <= n - 1.
+    # TODO: Cast to array.
     deltas = rews[:-1] + ox.gamma * vals[1:] - vals[:-1]
     advantages = discounted_cumulative_sum(deltas, ox.gamma * ox.lam)
     returns = fast_reward_to_go(rews[:-1], ox.gamma)

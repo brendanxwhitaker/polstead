@@ -8,10 +8,17 @@ import gym
 
 from oxentiel import Oxentiel
 
-from vpg import get_action, compute_loss, finish, ActorCritic, RolloutStorage
 from asta import dims, shapes
+from vpg import (
+    get_action,
+    compute_policy_loss,
+    compute_value_loss,
+    finish,
+    ActorCritic,
+    RolloutStorage,
+)
 
-SETTINGS_PATH = "settings_pg.json"
+SETTINGS_PATH = "settings_vpg.json"
 
 
 def train(ox: Oxentiel) -> None:
@@ -36,29 +43,36 @@ def train(ox: Oxentiel) -> None:
         prev_ob = ob
 
         ob_t = torch.Tensor(ob)
-        act = get_action(ac, ob_t)
+        act, val = get_action(ac, ob_t)
         ob, rew, done, _ = env.step(act)
 
-        rollouts.add(prev_ob, act, rew)
+        rollouts.add(prev_ob, act, val, rew)
 
         # If we're done, or we finished a batch.
         if done or (i > 0 and i % ox.batch_size == 0):
             rews = rollouts.rews
-            ep_weights = finish(rews)
+            vals = rollouts.vals
+            last_val = 0 if done else vals[-1]
+            ep_weights = finish(ox, rews, vals, last_val)
             rollouts.weights.extend(ep_weights)
             ob, done = env.reset(), False
 
         if i > 0 and i % ox.batch_size == 0:
             mean_ret, mean_ep_len = rollouts.stats()
-            obs, acts, weights = rollouts.get()
+            obs, acts, weights, rets = rollouts.get()
 
             actor_optimizer.zero_grad()
-            batch_loss = compute_loss(ac, obs, acts, weights)
-            batch_loss.backward()
+            policy_loss = compute_policy_loss(ac, obs, acts, weights)
+            policy_loss.backward()
             actor_optimizer.step()
 
+            critic_optimizer.zero_grad()
+            value_loss = compute_value_loss(ac, obs, rets)
+            value_loss.backward()
+            critic_optimizer.step()
+
             print(f"Iteration: {i} \t ", end="")
-            print(f"Loss: {batch_loss:.3f} \t ", end="")
+            print(f"Loss: {policy_loss:.3f} \t ", end="")
             print(f"Mean return: {mean_ret:.3f} \t ", end="")
             print(f"Mean episode length: {mean_ep_len:.3f} \t ", end="\n")
 
