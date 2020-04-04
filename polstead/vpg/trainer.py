@@ -53,8 +53,12 @@ def train(ox: Oxentiel) -> None:
             rews = rollouts.rews
             vals = rollouts.vals
             last_val = 0 if done else vals[-1]
-            ep_weights = finish(ox, rews, vals, last_val)
+            ep_weights, ep_rets = finish(ox, rews, vals, last_val)
+            rollouts.rews = []
+            rollouts.vals = []
+            rollouts.lens.append(len(ep_weights))
             rollouts.weights.extend(ep_weights)
+            rollouts.rets.extend(ep_rets)
             ob, done = env.reset(), False
 
         if i > 0 and i % ox.batch_size == 0:

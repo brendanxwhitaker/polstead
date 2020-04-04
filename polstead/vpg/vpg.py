@@ -1,7 +1,7 @@
 """ Functions for a simple policy gradient. """
 from typing import List, Tuple
 
-import scipy
+import scipy.signal
 import numpy as np
 
 import torch
@@ -231,8 +231,12 @@ def finish(
     # See the GAE paper, definition of $\delta$ is between equations (9) and (10).
     # $\delta_{t}^{V} = r_t + \gamma V(s_{t + 1}) - V(s_t)$.
     # We compute deltas for 0 <= t <= n - 1.
-    # TODO: Cast to array.
-    deltas = rews[:-1] + ox.gamma * vals[1:] - vals[:-1]
+    gamma_weighted_vals = [ox.gamma * val for val in vals[1:]]
+    # deltas = rews[:-1] + ox.gamma * vals[1:] - vals[:-1]
+    deltas = [
+        rew + weighted - val
+        for rew, weighted, val in zip(rews[:-1], gamma_weighted_vals, vals[:-1])
+    ]
     advantages = discounted_cumulative_sum(deltas, ox.gamma * ox.lam)
     returns = fast_reward_to_go(rews[:-1], ox.gamma)
 
