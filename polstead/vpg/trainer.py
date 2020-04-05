@@ -77,7 +77,6 @@ def train(ox: Oxentiel) -> None:
 
             print(f"Iteration: {i} \t ", end="")
             print(f"Loss: {policy_loss:.3f} \t ", end="")
-            print(f"Mean return: {mean_ret:.3f} \t ", end="")
             print(f"Mean episode length: {mean_ep_len:.3f} \t ", end="\n")
 
 

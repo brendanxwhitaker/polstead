@@ -239,6 +239,7 @@ def finish(
     ]
     advantages = discounted_cumulative_sum(deltas, ox.gamma * ox.lam)
     returns = fast_reward_to_go(rews[:-1], ox.gamma)
+    # returns = reward_to_go(rews[:-1])
 
     assert len(deltas) == len(advantages) == len(returns) == n
 

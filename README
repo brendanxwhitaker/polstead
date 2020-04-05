@@ -3,3 +3,17 @@
 +--------+
 
 An empty library.
+
+TODO
+----
+- Add basic implementations of:
+    1. Simple policy gradient
+    2. VPG
+    3. A2C
+    4. DQN
+    5. PPO
+
+- Restructure the repo so there's only one trainer file, one rollouts object
+  and everything is functional.
+- Add support for all possible action spaces and observation spaces.
+- Move everything to a website where code can be inserted alongside text.
