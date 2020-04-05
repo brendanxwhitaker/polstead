@@ -20,6 +20,10 @@ def train(ox: Oxentiel) -> None:
     # Make the environment.
     env: gym.Env = gym.make(ox.env_name)
 
+    # Set shapes and dimensions for use in type hints.
+    dims.ACTS = env.action_space.n
+    shapes.OB = env.observation_space.shape
+
     # Make the policy object.
     ac = ActorCritic(ox)
 
@@ -59,13 +63,13 @@ def train(ox: Oxentiel) -> None:
             # Step 1: Compute advantages and critic targets.
 
             # Get episode length.
-            ep_len = rollouts.episode_length
+            ep_len = rollouts.ep_len
 
             # Retrieve values and rewards for the current episode.
             vals: Array[float, ep_len]
             rews: Array[float, ep_len]
             # TODO: This should do some slicing to only get up to ``ep_len``.
-            vals, rews = rollouts.get_episode_rewards_and_values()
+            vals, rews = rollouts.get_episode_values_and_rewards()
 
             # The last value should be zero if this is the end of an episode.
             last_val: int = 0 if done else vals[-1]
