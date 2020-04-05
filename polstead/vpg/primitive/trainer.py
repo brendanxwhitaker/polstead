@@ -39,11 +39,12 @@ def train(ox: Oxentiel) -> None:
 
     for i in range(ox.iterations):
 
-        # Critical: to add prev ob to rollouts buffer.
-        prev_ob = ob
-
         ob_t = torch.Tensor(ob)
         act, val = get_action(ac, ob_t)
+
+        # Critical: add prev ob to rollouts buffer.
+        prev_ob = ob
+
         ob, rew, done, _ = env.step(act)
 
         rollouts.add(prev_ob, act, val, rew)
