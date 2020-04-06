@@ -1,7 +1,7 @@
 """ A vanilla policy gradient implementation (numpy). """
 import gym
 from torch.optim import Adam
-from asta import Array, Tensor, shapes
+from asta import Array, Tensor, shapes, dims
 from oxentiel import Oxentiel
 
 from vpg import ActorCritic, RolloutStorage
@@ -25,14 +25,14 @@ def train(ox: Oxentiel) -> None:
     shapes.OB = env.observation_space.shape
 
     # Make the policy object.
-    ac = ActorCritic(ox)
+    ac = ActorCritic(shapes.OB[0], ox.hidden_dim, dims.ACTS)
 
     # Make optimizers.
     policy_optimizer = Adam(ac.pi.parameters(), lr=ox.lr)
     value_optimizer = Adam(ac.v.parameters(), lr=ox.lr)
 
     # Create a buffer object to store trajectories.
-    rollouts = RolloutStorage(ox)
+    rollouts = RolloutStorage(ox.batch_size, shapes.OB)
 
     # Get the initial observation.
     ob: Array[float, shapes.OB]
@@ -68,15 +68,14 @@ def train(ox: Oxentiel) -> None:
             # Retrieve values and rewards for the current episode.
             vals: Array[float, ep_len]
             rews: Array[float, ep_len]
-            # TODO: This should do some slicing to only get up to ``ep_len``.
             vals, rews = rollouts.get_episode_values_and_rewards()
 
             # The last value should be zero if this is the end of an episode.
-            last_val: int = 0 if done else vals[-1]
+            last_val: float = 0.0 if done else vals[-1]
 
             # Compute advantages and rewards-to-go.
             advs: Array[float, ep_len] = get_advantages(ox, rews, vals, last_val)
-            rtgs: Array[float, ep_len] = get_rewards_to_go(ox, rews, vals, last_val)
+            rtgs: Array[float, ep_len] = get_rewards_to_go(ox, rews)
 
             # Step 2: Reset vals and rews in buffer and record computed quantities.
             rollouts.vals[:] = 0
@@ -86,9 +85,10 @@ def train(ox: Oxentiel) -> None:
             rollouts.lens.append(len(advs))
 
             # Record advantages and rewards-to-go.
-            j = rollouts.ptr
+            j = rollouts.ep_start
             rollouts.advs[j : j + ep_len] = advs
             rollouts.rtgs[j : j + ep_len] = rtgs
+            rollouts.ep_start = j + ep_len
 
             # Step 3: Reset the environment.
             ob = env.reset()
@@ -99,8 +99,6 @@ def train(ox: Oxentiel) -> None:
             # Get batch data from the buffer.
             obs: Tensor[float, (ox.batch_size, *shapes.OB)]
             acts: Tensor[int, (ox.batch_size)]
-            advs: Tensor[float, (ox.batch_size)]
-            rtgs: Tensor[float, (ox.batch_size)]
             obs, acts, advs, rtgs = rollouts.get_batch()
 
             # Run a backward pass on the policy (actor).
