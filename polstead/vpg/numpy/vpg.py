@@ -1,5 +1,5 @@
 """ Vanilla policy gradient classes and functions. """
-from typing import Tuple
+from typing import Tuple, List
 
 import scipy.signal
 import numpy as np
@@ -44,7 +44,7 @@ class Actor(nn.Module):
 
     def forward(
         self, x: Tensor[float, (..., *shapes.OB)]
-    ) -> Tensor[float, (..., *dims.ACTS)]:
+    ) -> Tensor[float, (..., dims.ACTS)]:
         r"""
         Takes as input observations or batches of observations.
 
@@ -217,7 +217,9 @@ def get_action(
     """
     ob = torch.Tensor(ob)
     act = get_distribution(ac.pi, ob).sample().numpy()
-    val = ac.v(ob)
+
+    # Detach from GPU, convert to numpy, then reshape (1,) -> ().
+    val = ac.v(ob).detach().numpy().reshape(()).astype(np.float64)
     return act, val
 
 
@@ -241,15 +243,16 @@ class RolloutStorage:
 
     def __init__(self, batch_size: int, ob_shape: Tuple[int, ...]):
         self.obs: Array[float] = np.zeros((batch_size, *ob_shape))
-        self.acts: Array[int] = np.zeros((batch_size,))
+        self.acts: Array[int] = np.zeros((batch_size,), dtype=np.int64)
         self.vals: Array[float] = np.zeros((batch_size,))
         self.rews: Array[float] = np.zeros((batch_size,))
         self.advs: Array[float] = np.zeros((batch_size,))
         self.rtgs: Array[float] = np.zeros((batch_size,))
+        self.rets: List[float] = []
         self.lens: List[int] = []
         self.batch_len = 0
-        self.ep_start = 0
         self.ep_len = 0
+        self.ep_start = 0
 
         self.ob_shape = ob_shape
         self.batch_size = batch_size
@@ -305,14 +308,14 @@ class RolloutStorage:
         """
         assert self.batch_len == self.batch_size
         obs = torch.Tensor(self.obs)
-        acts = torch.Tensor(self.acts)
+        acts = torch.Tensor(self.acts).int()
         advs = torch.Tensor(self.advs)
         rtgs = torch.Tensor(self.rtgs)
 
         # Reset buffer.
         self.batch_len = 0
         self.obs = np.zeros((self.batch_size, *self.ob_shape))
-        self.acts = np.zeros((self.batch_size,))
+        self.acts = np.zeros((self.batch_size,), dtype=np.int64)
         self.vals = np.zeros((self.batch_size,))
         self.rews = np.zeros((self.batch_size,))
 

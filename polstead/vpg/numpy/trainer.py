@@ -1,5 +1,8 @@
 """ A vanilla policy gradient implementation (numpy). """
+import time
+import json
 import gym
+import numpy as np
 from torch.optim import Adam
 from asta import Array, Tensor, shapes, dims
 from oxentiel import Oxentiel
@@ -13,6 +16,8 @@ from vpg import (
     get_value_loss,
 )
 
+SETTINGS_PATH = "settings_vpg.json"
+
 
 def train(ox: Oxentiel) -> None:
     """ Trains a policy gradient model with hyperparams from ``ox``. """
@@ -21,6 +26,7 @@ def train(ox: Oxentiel) -> None:
     env: gym.Env = gym.make(ox.env_name)
 
     # Set shapes and dimensions for use in type hints.
+    dims.BATCH = ox.batch_size
     dims.ACTS = env.action_space.n
     shapes.OB = env.observation_space.shape
 
@@ -37,6 +43,8 @@ def train(ox: Oxentiel) -> None:
     # Get the initial observation.
     ob: Array[float, shapes.OB]
     ob = env.reset()
+
+    t_start = time.time()
 
     for i in range(ox.iterations):
 
@@ -58,12 +66,13 @@ def train(ox: Oxentiel) -> None:
         ob = next_ob
 
         # If we reached a terminal state, or we completed a batch.
-        if done or (i > 0 and i % ox.batch_size == 0):
+        if done or rollouts.batch_len == ox.batch_size:
 
             # Step 1: Compute advantages and critic targets.
 
             # Get episode length.
             ep_len = rollouts.ep_len
+            dims.EP_LEN = ep_len
 
             # Retrieve values and rewards for the current episode.
             vals: Array[float, ep_len]
@@ -77,24 +86,28 @@ def train(ox: Oxentiel) -> None:
             advs: Array[float, ep_len] = get_advantages(ox, rews, vals, last_val)
             rtgs: Array[float, ep_len] = get_rewards_to_go(ox, rews)
 
+            # Record the episode length.
+            if done:
+                rollouts.lens.append(len(advs))
+                rollouts.rets.append(np.sum(rews))
+
             # Step 2: Reset vals and rews in buffer and record computed quantities.
             rollouts.vals[:] = 0
             rollouts.rews[:] = 0
 
-            # Record the episode length.
-            rollouts.lens.append(len(advs))
-
             # Record advantages and rewards-to-go.
             j = rollouts.ep_start
+            assert j + ep_len <= ox.batch_size
             rollouts.advs[j : j + ep_len] = advs
             rollouts.rtgs[j : j + ep_len] = rtgs
             rollouts.ep_start = j + ep_len
+            rollouts.ep_len = 0
 
             # Step 3: Reset the environment.
             ob = env.reset()
 
         # If we completed a batch.
-        if i > 0 and i % ox.batch_size == 0:
+        if rollouts.batch_len == ox.batch_size:
 
             # Get batch data from the buffer.
             obs: Tensor[float, (ox.batch_size, *shapes.OB)]
@@ -112,3 +125,30 @@ def train(ox: Oxentiel) -> None:
             value_loss = get_value_loss(ac.v, obs, rtgs)
             value_loss.backward()
             value_optimizer.step()
+
+            # Reset pointers.
+            rollouts.batch_len = 0
+            rollouts.ep_start = 0
+
+            # Print statistics.
+            mean_ret = np.mean(rollouts.rets)
+            mean_len = np.mean(rollouts.lens)
+            print(f"Iteration: {i + 1} | ", end="")
+            print(f"Time: {time.time() - t_start:.5f} | ", end="")
+            print(f"Mean episode return: {mean_ret:.5f} | ", end="")
+            print(f"Mean episode length: {mean_len:.5f}")
+            t_start = time.time()
+            rollouts.rets = []
+            rollouts.lens = []
+
+
+def main() -> None:
+    """ Just loads the settings file and calls ``train()``. """
+    with open(SETTINGS_PATH, "r") as settings_file:
+        settings = json.load(settings_file)
+    ox = Oxentiel(settings)
+    train(ox)
+
+
+if __name__ == "__main__":
+    main()

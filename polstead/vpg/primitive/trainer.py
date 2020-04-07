@@ -1,4 +1,5 @@
 """ An example trainer for a simply policy gradient implementation. """
+import time
 import json
 
 import torch
@@ -36,6 +37,7 @@ def train(ox: Oxentiel) -> None:
 
     ob = env.reset()
     done = False
+    t_start = time.time()
 
     for i in range(ox.iterations):
 
@@ -77,8 +79,10 @@ def train(ox: Oxentiel) -> None:
             critic_optimizer.step()
 
             print(f"Iteration: {i} \t ", end="")
+            print(f"Time: {time.time() - t_start:.3f} \t ", end="")
             print(f"Loss: {policy_loss:.3f} \t ", end="")
             print(f"Mean episode length: {mean_ep_len:.3f} \t ", end="\n")
+            t_start = time.time()
 
 
 def main() -> None:
