@@ -55,12 +55,19 @@ def main() -> None:
 
     for i in range(ox.iterations):
 
-        if i % ox.batch_size == 0:
+        if i > 0 and i % ox.batch_size == 0:
             mean_ret = np.mean(agent.rollouts.rets)
-            print(f"Iteration: {agent.i} | Mean return: {mean_ret}")
+            num_rets = len(agent.rollouts.rets)
+            print(
+                f"Iteration: {agent.i} | Mean return: {mean_ret} | Num returns: {num_rets}"
+            )
 
         act = agent(ob, rew, done)
         ob, rew, done, info = env.step(int(act))
+
+        if done:
+            ob = env.reset()
+
 
 if __name__ == "__main__":
     main()
