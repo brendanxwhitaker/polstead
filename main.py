@@ -10,7 +10,7 @@ from oxentiel import Oxentiel
 from polstead.vanilla import VPG
 
 
-SETTINGS_PATH = "polstead/settings/settings.json"
+SETTINGS_PATH = "settings/settings.json"
 
 
 def main() -> None:
@@ -58,9 +58,9 @@ def main() -> None:
         if i > 0 and i % ox.batch_size == 0:
             mean_ret = np.mean(agent.rollouts.rets)
             num_rets = len(agent.rollouts.rets)
-            print(
-                f"Iteration: {agent.i} | Mean return: {mean_ret} | Num returns: {num_rets}"
-            )
+            lr = scheduler.get_lr()
+            print(f"Iteration: {agent.i} | Mean return: {mean_ret:.3f} | ", end="")
+            print(f"LR: {lr}")
 
         act = agent(ob, rew, done)
         ob, rew, done, info = env.step(int(act))

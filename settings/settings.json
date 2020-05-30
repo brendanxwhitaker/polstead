@@ -1,0 +1,11 @@
+{
+    "env_name": "CartPole-v0",
+    "lr": 1e-2,
+    "hidden_size": 32,
+    "iterations": 100000,
+    "batch_size": 1000,
+    "cycle_steps": 100,
+    "epochs": 50,
+    "gamma": 0.99,
+    "lam": 0.97
+}

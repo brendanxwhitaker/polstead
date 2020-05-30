@@ -111,6 +111,7 @@ class VPG(nn.Module):
             loss = policy_loss + value_loss
             loss.backward()
             self.optimizer.step()
+            self.scheduler.step()
 
             # Reset pointers.
             self.rollouts.batch_len = 0
