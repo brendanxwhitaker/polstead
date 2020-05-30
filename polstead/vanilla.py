@@ -52,56 +52,69 @@ class VPG(nn.Module):
         self, ob: Array[float, shapes.OB], rew: float, done: bool
     ) -> Array[int, ()]:
         """ Returns an observation given an action, learning as necessary. """
-        # Add the data from the previous timestep, since we now have resulting reward.
+        # Record data from the previous timestep.
         if self.i > 0:
             self.rollouts.add(self.ob, self.act, self.val, rew)
 
         # If we reached a terminal state, or we completed a batch.
         if done or self.rollouts.batch_len == self.ox.batch_size:
 
-            # Step 1: Compute advantages and critic targets.
+            # ==============================================
+            # STEP 1: Compute advantages and critic targets.
+            # ==============================================
 
             # Get episode length.
-            ep_len = self.rollouts.ep_len
-            dims.EP_LEN = ep_len
+            dims.EP_LEN = self.rollouts.ep_len
+
+            # Types and shapes.
+            vals: Array[float, dims.EP_LEN]
+            rews: Array[float, dims.EP_LEN]
+            advs: Array[float, dims.EP_LEN]
+            rtgs: Array[float, dims.EP_LEN]
 
             # Retrieve values and rewards for the current episode.
-            vals: Array[float, ep_len]
-            rews: Array[float, ep_len]
             vals, rews = self.rollouts.get_episode_values_and_rewards()
 
             # The last value should be zero if this is the end of an episode.
             last_val: float = 0.0 if done else vals[-1]
 
             # Compute advantages and rewards-to-go.
-            advs: Array[float, ep_len] = get_advantages(
-                self.ox.gamma, self.ox.lam, rews, vals, last_val
-            )
-            rtgs: Array[float, ep_len] = get_rewards_to_go(self.ox.gamma, rews)
+            advs = get_advantages(self.ox.gamma, self.ox.lam, rews, vals, last_val)
+            rtgs = get_rewards_to_go(self.ox.gamma, rews)
 
-            # Record the episode length.
+            # Record the episode length and return.
             if done:
-                self.rollouts.lens.append(len(advs))
+                self.rollouts.lens.append(dims.EP_LEN)
                 self.rollouts.rets.append(np.sum(rews))
 
+            # =====================================================================
             # Step 2: Reset vals and rews in buffer and record computed quantities.
+            # =====================================================================
+
+            # Reset the values and rewards arrays to zeroes.
             self.rollouts.vals[:] = 0
             self.rollouts.rews[:] = 0
 
-            # Record advantages and rewards-to-go.
+            # Get a pointer to the start of the episode we just finished.
             j = self.rollouts.ep_start
-            assert j + ep_len <= self.ox.batch_size
-            self.rollouts.advs[j : j + ep_len] = advs
-            self.rollouts.rtgs[j : j + ep_len] = rtgs
-            self.rollouts.ep_start = j + ep_len
+            assert j + dims.EP_LEN <= self.ox.batch_size
+
+            # Append advantages and rewards-to-go to arrays in rollouts.
+            self.rollouts.advs[j : j + dims.EP_LEN] = advs
+            self.rollouts.rtgs[j : j + dims.EP_LEN] = rtgs
+
+            # Set the new episode starting point, and set episode length to zero.
+            self.rollouts.ep_start = j + dims.EP_LEN
             self.rollouts.ep_len = 0
 
         # If we completed a batch.
         if self.rollouts.batch_len == self.ox.batch_size:
 
-            # Get batch data from the buffer.
+            # Types and shapes.
             obs: Tensor[float, (self.ox.batch_size, *shapes.OB)]
             acts: Tensor[int, (self.ox.batch_size)]
+
+            # Get batch data from the buffer.
             obs, acts, advs, rtgs = self.rollouts.get_batch()
 
             # Run a backward pass on the policy (actor) and value function (critic).
