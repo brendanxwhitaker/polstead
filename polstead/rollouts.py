@@ -19,7 +19,7 @@ class RolloutStorage:
         self.vals: Array[float] = np.zeros((batch_size,))
         self.rews: Array[float] = np.zeros((batch_size,))
         self.advs: Array[float] = np.zeros((batch_size,))
-        self.rtgs: Array[float] = np.zeros((batch_size,))
+        self.tgts: Array[float] = np.zeros((batch_size,))
         self.rets: List[float] = []
         self.lens: List[int] = []
         self.batch_len = 0
@@ -75,14 +75,14 @@ class RolloutStorage:
             A batch of actions.
         advs : ``Tensor[float, dims.BATCH]``.
             A batch of advantages.
-        rtgs : ``Tensor[float, dims.BATCH]``.
-            A batch of rewards-to-go.
+        tgts : ``Tensor[float, dims.BATCH]``.
+            A batch of value prediction targets.
         """
         assert self.batch_len == self.batch_size
         obs = torch.Tensor(self.obs)
         acts = torch.Tensor(self.acts).int()
         advs = torch.Tensor(self.advs)
-        rtgs = torch.Tensor(self.rtgs)
+        tgts = torch.Tensor(self.tgts)
 
         # Reset buffer.
         self.batch_len = 0
@@ -91,4 +91,4 @@ class RolloutStorage:
         self.vals = np.zeros((self.batch_size,))
         self.rews = np.zeros((self.batch_size,))
 
-        return obs, acts, advs, rtgs
+        return obs, acts, advs, tgts

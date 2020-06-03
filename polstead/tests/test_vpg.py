@@ -1,3 +1,4 @@
+""" Test module. """
 import json
 import itertools
 import gym
@@ -55,7 +56,7 @@ def test_vpg() -> None:
 
     for i in range(ox.iterations):
         act = agent(ob, rew, done)
-        ob, rew, done, info = env.step(int(act))
+        ob, rew, done, _info = env.step(int(act))
 
         if i % ox.batch_size == 0:
             mean_ret = np.mean(agent.rollouts.rets)

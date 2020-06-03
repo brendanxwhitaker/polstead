@@ -18,7 +18,7 @@ def get_batch_distribution(
 
 
 @typechecked
-def get_distribution(pi: nn.Module, ob: Tensor[float, shapes.OB],) -> Categorical:
+def get_distribution(pi: nn.Module, ob: Tensor[float, shapes.OB]) -> Categorical:
     """ Returns a distribution over actions given a single observation. """
     return Categorical(logits=pi(ob))
 
