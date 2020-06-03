@@ -20,13 +20,13 @@ class LSTM(nn.Module):
         input_size: int,
         hidden_size: int,
         output_size: int,
-        batch_size: int,
         num_layers: int,
         dropout: float,
         bi: bool,
     ):
         super().__init__()
         num_dirs = 2 if bi else 1
+        batch_size = 1
         self.batch_size = batch_size
         self.output_size = output_size
         self.lstm = nn.LSTM(
@@ -44,8 +44,8 @@ class LSTM(nn.Module):
         self.cell = torch.zeros((num_layers * num_dirs, batch_size, hidden_size))
 
     def forward(
-        self, x: Tensor[float, (BATCH_SIZE, SEQ_LEN, IN_SIZE)]
-    ) -> Tensor[float, (BATCH_SIZE, OUT_SIZE)]:
+        self, x: Tensor[float, (SEQ_LEN, IN_SIZE)]
+    ) -> Tensor[float, (SEQ_LEN, OUT_SIZE)]:
         """ Execute a forward pass through the module. """
         self.hidden.detach_()
         self.cell.detach_()
@@ -53,6 +53,9 @@ class LSTM(nn.Module):
         logits: Tensor[float, (BATCH_SIZE, SEQ_LEN, NUM_DIRS * HIDDEN_SIZE)]
 
         # Pass the input through the LSTM layers.
+        x = x.unsqueeze(0)
+        if len(x.shape) == 2:
+            x = x.unsqueeze(0)
         logits, states = self.lstm(x, (self.hidden, self.cell))
 
         # Update the LSTM states.
@@ -61,4 +64,4 @@ class LSTM(nn.Module):
         # Pass the LSTM last layer logits/outs through linear layer.
         outs: Tensor[float, (BATCH_SIZE, SEQ_LEN, OUT_SIZE)] = self.linear(logits)
 
-        return outs
+        return outs[0]

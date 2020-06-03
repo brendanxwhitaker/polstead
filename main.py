@@ -8,6 +8,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 from asta import shapes, dims
 from oxentiel import Oxentiel
 from polstead.vanilla import VPG
+from polstead.autoregressors import LSTM
 
 
 SETTINGS_PATH = "settings/settings.json"
@@ -31,6 +32,7 @@ def main() -> None:
         nn.RReLU(),
         nn.Linear(ox.hidden_size, ox.hidden_size),
         nn.RReLU(),
+        LSTM(ox.hidden_size, ox.hidden_size, ox.hidden_size, 3, 0.0, False),
         nn.Linear(ox.hidden_size, dims.ACTS),
     )
     critic = nn.Sequential(
